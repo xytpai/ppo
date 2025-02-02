@@ -11,4 +11,5 @@ python run_off_policy.py
 ```
 
 Off-policy reward curve:
+
 ![Off-policy Reward Curve](off-policy-reward.png)
