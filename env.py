@@ -23,7 +23,7 @@ class PlayGround:
         self.height = height
         self.width = width
         self.num_eat = num_eat
-        self.space = torch.full((batch_size, height, width), EMPTY)
+        self.space = torch.full((batch_size, height, width), EMPTY, dtype=torch.long)
         self.space[:, 0, :] = WALL
         self.space[:, height-1, :] = WALL
         self.space[:, :, 0] = WALL
@@ -47,7 +47,7 @@ class PlayGround:
             self.space[b, self.y[b], self.x[b]] = ME
     
     def get_space(self):
-        return self.space
+        return self.space.clone()
 
     def interact(self, action):
         rw = torch.empty(self.batch_size, dtype=torch.float)

@@ -2,12 +2,12 @@ import torch
 import env
 import model
 import matplotlib.pyplot as plt
-import copy
+
 
 def main(
         batch_size=4,
-        height=9,
-        width=9,
+        height=12,
+        width=12,
         num_eat=20,
         nstep=50,
         nepisode=10000,
@@ -24,29 +24,24 @@ def main(
         playground = env.PlayGround(batch_size, height, width, num_eat)
         playground.set_random()
 
-        agent_old = copy.deepcopy(agent)
-        agent_old.eval()
-        # agent_old = agent
-
         observe_actions = []
         observe_log_probs = []
         observe_states = []
         observe_rewards = []
 
         with torch.no_grad():
-        # if True:
             for step in range(nstep):
                 state = playground.get_space()
-                action_probs = agent_old(state)
+                action_probs = agent(state)
                 dist = torch.distributions.Categorical(action_probs)
                 action = dist.sample()
                 log_prob = dist.log_prob(action)
                 rewards = playground.interact(model.decode_action(action))
-                observe_actions.append(action)
-                observe_log_probs.append(log_prob)
-                observe_states.append(state)
-                observe_rewards.append(rewards)
-        
+                observe_actions.append(action.clone())
+                observe_log_probs.append(log_prob.clone())
+                observe_states.append(state.clone())
+                observe_rewards.append(rewards.clone())
+            
             discounted_rewards = []
             cumulative_reward = 0
             for r in reversed(observe_rewards):
@@ -55,25 +50,24 @@ def main(
             discounted_rewards = torch.stack(discounted_rewards, dim=-1) # b, step
             discounted_rewards = (discounted_rewards - discounted_rewards.mean(dim=1, keepdim=True)
                                 ) / (discounted_rewards.std(dim=1, keepdim=True) + 1e-6)
-            observe_log_probs = torch.stack(observe_log_probs, dim=-1)
-            observe_rewards = torch.stack(observe_rewards, dim=-1)
+            observe_log_probs = torch.stack(observe_log_probs, dim=-1) # b, step
+            observe_rewards = torch.stack(observe_rewards, dim=-1) # b, step
 
-        agent.train()
         actual_log_probs = []
+        entropy_loss = 0
         for state, action in zip(observe_states, observe_actions):
             action_probs = agent(state)
             dist = torch.distributions.Categorical(action_probs)
+            entropy_loss += dist.entropy().mean()
             log_prob = dist.log_prob(action)
             actual_log_probs.append(log_prob)
-        
-        # b, step
-        actual_log_probs = torch.stack(actual_log_probs, dim=-1)
-        
-        ratio = torch.exp(actual_log_probs - observe_log_probs)
-        ratio = torch.min(ratio, torch.clamp(ratio, 1 - clip_epsilon, 1 + clip_epsilon))
-        ratio = ratio.detach()
+        actual_log_probs = torch.stack(actual_log_probs, dim=-1) # b, step
 
-        loss = - (ratio * actual_log_probs * discounted_rewards).sum(dim=1).mean()
+        ratio = torch.exp(actual_log_probs - observe_log_probs.detach())
+        loss = - torch.min(
+            ratio * discounted_rewards, 
+            torch.clamp(ratio, 1 - clip_epsilon, 1 + clip_epsilon
+        ) * discounted_rewards).sum(dim=1).mean() - 0.01 * entropy_loss
         
         optimizer.zero_grad()
         loss.backward()
